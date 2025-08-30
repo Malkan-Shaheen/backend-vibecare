@@ -4,6 +4,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
+require('dotenv').config();
+
 
 // const imagesRoutes=require('../backend/models/Images');
 

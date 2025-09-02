@@ -18,7 +18,7 @@ const {
   MONGO_URL, 
   EMAIL_USER, 
   EMAIL_PASS 
-} = require('../config/config.js');
+} = require('./config/config.js');
 
 // Example usage in backend
 console.log('MongoDB URL:', MONGO_URL);

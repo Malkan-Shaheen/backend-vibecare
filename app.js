@@ -4,8 +4,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
-require('dotenv').config();
-
 
 // const imagesRoutes=require('../backend/models/Images');
 
@@ -20,7 +18,7 @@ const {
   MONGO_URL, 
   EMAIL_USER, 
   EMAIL_PASS 
-} = require('./config/config');
+} = require('../../ReactNative/VibeCare/config/api');
 
 // Example usage in backend
 console.log('MongoDB URL:', MONGO_URL);
@@ -56,9 +54,8 @@ const User = mongoose.model('Userinfo', UserDetailSchema);
 
 // Default Route
 app.get("/", (req, res) => {
-  res.json({ status: "API running", db: mongoose.connection.readyState });
+    res.send({ status: "Started" });
 });
-
 
 // User Registration
 app.post("/register", async (req, res) => {
@@ -133,29 +130,75 @@ app.get("/get-user/:userId", async (req, res) => {
 
 // User Login
 app.post("/login-user", async (req, res) => {
-    const { Email, Password } = req.body;
+  const { Email, Password } = req.body;
 
-    try {
-        const oldUser = await User.findOne({ Email });
-        if (!oldUser) {
-            return res.status(404).send({ status: "error", message: "User does not exist" });
-        }
-
-        if (await bcrypt.compare(Password, oldUser.Password)) {
-            const token = jwt.sign({ Email: oldUser.Email }, JWT_SECRET, { expiresIn: '1h' });
-            return res.status(200).send({
-                status: "ok",
-                data: token,
-                userId: oldUser._id,
-            });
-        } else {
-            return res.status(400).send({ status: "error", message: "Invalid credentials" });
-        }
-    } catch (err) {
-        console.error('Login error:', err);
-        res.status(500).send({ status: "error", message: "Internal server error" });
+  try {
+    const oldUser = await User.findOne({ Email });
+    if (!oldUser) {
+      return res
+        .status(404)
+        .send({ status: "error", message: "User does not exist" });
     }
+
+    if (await bcrypt.compare(Password, oldUser.Password)) {
+      const token = jwt.sign({ Email: oldUser.Email }, JWT_SECRET, {
+        expiresIn: "1h",
+      });
+
+      // ✅ Save login history
+      await LoginHistory.create({
+        userId: oldUser._id,
+        email: oldUser.Email,
+        ip: req.ip, // Express provides IP
+        userAgent: req.headers["user-agent"], // device/browser info
+        success: true,
+      });
+
+      return res.status(200).send({
+        status: "ok",
+        data: token,
+        userId: oldUser._id,
+      });
+    } else {
+      return res
+        .status(400)
+        .send({ status: "error", message: "Invalid credentials" });
+    }
+  } catch (err) {
+    console.error("Login error:", err);
+    res
+      .status(500)
+      .send({ status: "error", message: "Internal server error" });
+  }
 });
+
+
+
+const LoginHistory = require("./models/LoginHistory"); // make sure model is imported
+
+// Get login history by userId
+app.get("/get-login-history/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const history = await LoginHistory.find({ userId: id })
+      .sort({ loginAt: -1 })   // latest first
+      .limit(10);              // last 10 logins only
+
+    res.status(200).send({
+      status: "success",
+      data: history,
+    });
+  } catch (err) {
+    console.error("Error fetching login history:", err);
+    res.status(500).send({
+      status: "error",
+      message: "Failed to fetch login history",
+    });
+  }
+});
+
+
 const otpStore = {};
 
 //send otp for email verification 
@@ -204,6 +247,49 @@ app.post('/send-otp', async (req, res) => {
       res.status(500).send({ status: 'error', message: 'Internal server error' });
   }
 });
+app.post('/send-reset-otp', async (req, res) => {
+  const { Email } = req.body;
+  console.log('Received reset password request for email:', Email);
+
+  try {
+      // ⚠️ Do NOT check whether user exists here
+      // Just send OTP regardless
+
+      // Generate OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      
+      otpStore[Email] = otp; // Save OTP temporarily in memory
+
+      // Send OTP email
+      const transporter = nodemailer.createTransport({
+          service: 'gmail',
+          auth: {
+              user: 'vibecare67@gmail.com',
+              pass: 'dmuo xfwq mxhl nzpq',
+          },
+      });
+
+      const mailOptions = {
+          from: 'vibecare67@gmail.com',
+          to: Email,
+          subject: 'Password Reset - VibeCare',
+          text: `Your OTP for password reset is: ${otp}\n\nEnter this OTP in the app to proceed with resetting your password.`,
+      };
+
+      transporter.sendMail(mailOptions, (error) => {
+          if (error) {
+              console.error('Error sending reset OTP email:', error);
+              return res.status(500).send({ status: 'error', message: 'Failed to send OTP email' });
+          }
+          res.send({ status: 'success', message: 'Reset OTP sent successfully' });
+      });
+
+  } catch (error) {
+      console.error('Error in send-reset-otp route:', error);
+      res.status(500).send({ status: 'error', message: 'Internal server error' });
+  }
+});
+
 
 app.post('/verify-otp', (req, res) => {
   const { Email, otp } = req.body;
@@ -485,6 +571,10 @@ app.get("/user-profile", async (req, res) => {
     ticketNumber: { type: String, required: true, unique: true }, // Unique ticket ID
     adminResponse: { type: String, default: '' }, // Admin's reply
     status: { type: String, enum: ['Open', 'Closed'], default: 'Open' }, // Ticket status
+    responded: {
+    type: Boolean,
+    default: false
+  },
   }, { timestamps: true });
   
   const Feedback = mongoose.model('Feedback', FeedbackSchema);
@@ -541,9 +631,11 @@ app.get("/user-profile", async (req, res) => {
         return res.status(404).json({ message: 'Ticket not found' });
       }
   
-      ticket.adminResponse = adminResponse;
-      ticket.status = 'Closed';
-      await ticket.save();
+     ticket.adminResponse = adminResponse;
+    ticket.status = 'Closed';
+    ticket.responded = true; // Add this line
+    await ticket.save();
+
   
       res.status(200).json({ message: 'Response saved successfully', ticket });
     } catch (error) {
@@ -580,7 +672,8 @@ app.put('/feedbacks/:id/response', async (req, res) => {
     try {
         const feedback = await Feedback.findByIdAndUpdate(
             req.params.id,
-            { response },
+            { response ,
+        responded: true },
             { new: true }
         );
         if (!feedback) {
@@ -617,7 +710,9 @@ app.put('/feedbacks/:id/respond', async (req, res) => {
   try {
       const updatedFeedback = await Feedback.findByIdAndUpdate(
           req.params.id,
-          { status: "Closed" }, // Ensure your schema has a "status" field
+          { status: "Closed" ,
+            responded: true
+          }, // Ensure your schema has a "status" field
           { new: true }
       );
       if (!updatedFeedback) {
@@ -1277,62 +1372,6 @@ app.get("/get-all-users", async (req, res) => {
     }
 });
 
-const LoginHistorySchema = new mongoose.Schema({
-    userId: String,
-    loginTime: { type: Date, default: Date.now },
-    ipAddress: String,
-});
-app.post("/login-user", async (req, res) => {
-    const { Email, Password } = req.body;
-
-    try {
-        const oldUser = await User.findOne({ Email });
-        if (!oldUser) {
-            return res.status(404).send({ status: "error", message: "User does not exist" });
-        }
-
-        // Compare passwords using bcryptjs
-        const isPasswordValid = await bcrypt.compare(Password, oldUser.Password);
-        
-        if (isPasswordValid) {
-            const token = jwt.sign({ Email: oldUser.Email }, JWT_SECRET, { expiresIn: "1h" });
-
-            // Save login history
-            await new LoginHistory({
-                userId: oldUser._id,
-                ipAddress: req.ip
-            }).save();
-
-            return res.status(200).send({
-                status: "ok",
-                data: token,
-                userId: oldUser._id,
-            });
-        } else {
-            return res.status(400).send({ status: "error", message: "Invalid credentials" });
-        }
-    } catch (err) {
-        console.error('Login error:', err);
-        res.status(500).send({ status: "error", message: "Internal server error" });
-    }
-});
-
-app.get("/get-login-history/:userId", async (req, res) => {
-    try {
-        const history = await LoginHistory.find({ userId: req.params.userId }).sort({ loginTime: -1 });
-        res.json({ status: "success", data: history });
-    } catch (error) {
-        console.error("Error fetching login history:", error);
-        res.status(500).json({ status: "error", message: "Internal server error" });
-    }
-});
-
-const PasswordResetHistorySchema = new mongoose.Schema({
-    userId: String,
-    resetTime: { type: Date, default: Date.now },
-});
-
-const PasswordResetHistory = mongoose.model("PasswordResetHistory", PasswordResetHistorySchema);
 
 app.delete("/delete-user/:userId", async (req, res) => {
     try {

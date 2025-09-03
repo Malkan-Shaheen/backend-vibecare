@@ -6,27 +6,29 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import load_model as tf_load_model
 from tensorflow.keras.losses import MeanSquaredError
+import os
 
 app = Flask(__name__)
 CORS(app)
 
 print("🔄 Loading models and scalers...")
 
-# --------------------------Recomendations rough--------------------
-# Initialize variables
+# Base directory for models
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # backend/
+MODEL_DIR = os.path.join(BASE_DIR, "Models_App")        # backend/Models_App
+
+# -------------------------- Recomendations rough --------------------
 suggestion_model = None
 label_encoder = None
 
 def load_suggestion_models():
     global suggestion_model, label_encoder
-    
     try:
-        # Load the pre-trained model and label encoder
-        suggestion_model = joblib.load(r'E:\ReactNative-Final\ReactNative\backend\model_suggest.joblib')
-        label_encoder = joblib.load(r'E:\ReactNative-Final\ReactNative\backend\label_encoder_suggest.joblib')
-        print("Suggestion model and label encoder loaded successfully")
+        suggestion_model = joblib.load(os.path.join(MODEL_DIR, "model_suggest.joblib"))
+        label_encoder = joblib.load(os.path.join(MODEL_DIR, "label_encoder_suggest.joblib"))
+        print("✅ Suggestion model and label encoder loaded successfully")
     except Exception as e:
-        print(f"Error loading suggestion model files: {str(e)}")
+        print(f"❌ Error loading suggestion model files: {str(e)}")
         raise
 
 # ---------------------- STRESS MODULE ----------------------
@@ -36,8 +38,8 @@ stress_scaler = None
 def load_stress_model():
     global stress_model, stress_scaler
     try:
-        stress_model = tf_load_model(r'E:\ReactNative-Final\ReactNative\backend\stress_model.h5')
-        stress_scaler = joblib.load(r'E:\ReactNative-Final\ReactNative\backend\scaler3.pkl')
+        stress_model = tf_load_model(os.path.join(MODEL_DIR, "stress_model.h5"))
+        stress_scaler = joblib.load(os.path.join(MODEL_DIR, "scaler3.pkl"))
         print("✅ Stress model and scaler loaded.")
     except Exception as e:
         print(f"❌ Error loading stress model: {e}")
@@ -49,13 +51,13 @@ suggestion_label_encoder = None
 def load_suggestion_model_v2():
     global suggestion_model_v2, suggestion_label_encoder
     try:
-        suggestion_model_v2 = joblib.load(r"E:\ReactNative-Final\ReactNative\backend\suggestion_model.pkl")
-        print("✅ Suggestion model loaded.")
+        suggestion_model_v2 = joblib.load(os.path.join(MODEL_DIR, "suggestion_model.pkl"))
+        print("✅ Suggestion model v2 loaded.")
     except Exception as e:
-        print("❌ Error loading suggestion model:", e)
+        print("❌ Error loading suggestion model v2:", e)
 
     try:
-        suggestion_label_encoder = joblib.load(r"E:\ReactNative-Final\ReactNative\backend\depression_scaler.pkl")
+        suggestion_label_encoder = joblib.load(os.path.join(MODEL_DIR, "depression_scaler.pkl"))
         print("✅ Suggestion label encoder loaded.")
     except Exception as e:
         print("❌ Error loading suggestion label encoder:", e)
@@ -66,7 +68,7 @@ depression_model = None
 def load_depression_model():
     global depression_model
     try:
-        depression_model = tf_load_model(r"E:\ReactNative-Final\ReactNative\backend\depression_model.h5", compile=False)
+        depression_model = tf_load_model(os.path.join(MODEL_DIR, "depression_model.h5"), compile=False)
         depression_model.compile(optimizer='adam', loss=MeanSquaredError(), metrics=['mse'])
         print("✅ Depression model loaded.")
     except Exception as e:
@@ -78,7 +80,7 @@ anxiety_model = None
 def load_anxiety_model():
     global anxiety_model
     try:
-        anxiety_model = joblib.load(r"E:\ReactNative-Final\ReactNative\backend\anxiety_model.pkl")
+        anxiety_model = joblib.load(os.path.join(MODEL_DIR, "anxiety_model.pkl"))
         print("✅ Anxiety model loaded.")
     except Exception as e:
         print("❌ Error loading anxiety model:", e)
@@ -91,11 +93,11 @@ load_depression_model()
 load_anxiety_model()
 
 # ---------------------- ROUTES ----------------------
-
 @app.route('/')
 def home():
     return "✅ Flask backend is running."
 
+    
 @app.route('/features', methods=['GET'])
 def get_model_features():
     try:

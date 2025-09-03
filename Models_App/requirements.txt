@@ -2,8 +2,8 @@ Flask
 flask-cors
 gunicorn
 pandas
-numpy
-joblib
-scikit-learn
 tensorflow==2.12.0
 python-dotenv
+numpy==1.26.4
+scikit-learn==1.3.2
+joblib==1.3.2

@@ -24,6 +24,9 @@ label_encoder = None
 def load_suggestion_models():
     global suggestion_model, label_encoder
     try:
+        import sys, numpy
+        sys.modules["numpy._core"] = numpy.core
+        
         suggestion_model = joblib.load(os.path.join(MODEL_DIR, "model_suggest.joblib"))
         label_encoder = joblib.load(os.path.join(MODEL_DIR, "label_encoder_suggest.joblib"))
         print("✅ Suggestion model and label encoder loaded successfully")
@@ -97,7 +100,7 @@ load_anxiety_model()
 def home():
     return "✅ Flask backend is running."
 
-    
+
 @app.route('/features', methods=['GET'])
 def get_model_features():
     try:

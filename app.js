@@ -312,21 +312,27 @@ app.post('/forgot-password', async (req, res) => {
             return res.status(404).send({ status: 'error', message: 'Email not registered!' });
         }
 
+        // Generate OTP
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        user.otp = otp;
-        user.resetTokenExpiration = new Date(Date.now() + 15 * 60 * 1000);
+
+        // ✅ Hash OTP before saving
+        const hashedOtp = await bcrypt.hash(otp, 10);
+
+        user.otp = hashedOtp;
+        user.resetTokenExpiration = new Date(Date.now() + 15 * 60 * 1000); // 15 min
         await user.save();
 
+        // Send plain OTP to email
         const transporter = nodemailer.createTransport({
             service: 'gmail',
             auth: {
               user: 'vibecare67@gmail.com',
-             pass: 'dmuo xfwq mxhl nzpq',
-           },
-         });
-     
-         const mailOptions = {
-           from: 'vibecare67@gmail.com',
+              pass: 'dmuo xfwq mxhl nzpq',
+            },
+        });
+
+        const mailOptions = {
+            from: 'vibecare67@gmail.com',
             to: Email,
             subject: 'Password Reset OTP',
             text: `Your OTP for password reset is: ${otp}`,
@@ -345,68 +351,39 @@ app.post('/forgot-password', async (req, res) => {
     }
 });
 
-
-
-// Verify OTP
-app.post('/verifyOtp', async (req, res) => {
+app.post("/verifyOtp", async (req, res) => {
+  try {
     const { Email, otp } = req.body;
+    console.log("🔹 Incoming verifyOtp request:", { Email, otp });
 
-    try {
-        // Find user by email
-        const user = await User.findOne({ Email });
-        
-        if (!user) {
-            return res.status(404).send({ 
-                status: 'error', 
-                message: 'Email not registered!' 
-            });
-        }
-
-        // Check if OTP exists and isn't expired
-        if (!user.otp || !user.resetTokenExpiration) {
-            return res.status(400).send({ 
-                status: 'error', 
-                message: 'No OTP requested or OTP expired' 
-            });
-        }
-
-        if (new Date() > user.resetTokenExpiration) {
-            return res.status(400).send({ 
-                status: 'error', 
-                message: 'OTP has expired' 
-            });
-        }
-
-        // Verify OTP matches
-        if (user.otp !== otp) {
-            return res.status(400).send({ 
-                status: 'error', 
-                message: 'Invalid OTP' 
-            });
-        }
-
-        // Clear the OTP after successful verification
-        user.otp = undefined;
-        user.resetTokenExpiration = undefined;
-        await user.save();
-
-        // If everything is valid
-        res.send({ 
-            status: 'success', 
-            message: 'OTP verified successfully',
-            // You might want to return a token or temporary password here
-            // for the next step (password reset)
-        });
-
-    } catch (error) {
-        console.error('Error in verify-otp route:', error);
-        res.status(500).send({ 
-            status: 'error', 
-            message: 'Internal server error' 
-        });
+    const user = await User.findOne({ Email: Email.toLowerCase() });
+    if (!user) {
+      console.log("❌ No user found with email:", Email);
+      return res.status(400).json({ status: "error", message: "User not found" });
     }
+
+    console.log("✅ User found. Stored OTP hash:", user.otp);
+
+    const isMatch = await bcrypt.compare(otp.toString(), user.otp);
+    console.log("🔍 bcrypt compare result:", isMatch);
+
+    if (!isMatch) {
+      return res.status(400).json({ status: "error", message: "Invalid otp" });
+    }
+
+    // check expiration if you set one
+    if (user.resetTokenExpiration && user.resetTokenExpiration < Date.now()) {
+      console.log("⏰ OTP expired");
+      return res.status(400).json({ status: "error", message: "OTP expired" });
+    }
+
+    res.json({ status: "success", message: "OTP verified" });
+  } catch (err) {
+    console.error("❌ Error in verifyOtp:", err);
+    res.status(500).json({ status: "error", message: "Server error" });
+  }
 });
-  
+
 
 
 
@@ -923,28 +900,66 @@ const CaretakerSchema = new mongoose.Schema({
 });
 
 const Caretaker = mongoose.model("Caretaker", CaretakerSchema);
-
 app.post("/add-caretaker", async (req, res) => {
-    const { userId, caretakerName, caretakerOtp } = req.body;
+  const { userId, caretakerName, caretakerOtp } = req.body;
 
-    if (!userId || !caretakerName || !caretakerOtp) {
-        return res.status(400).send({ status: "error", message: "Missing required fields" });
+  if (!userId || !caretakerName || !caretakerOtp) {
+    return res
+      .status(400)
+      .send({ status: "error", message: "Missing required fields" });
+  }
+
+  try {
+    // 🔍 Check if caretaker with same name already exists for this user
+    const existingCaretaker = await Caretaker.findOne({
+      userId,
+      caretakerName: caretakerName.trim().toLowerCase(),
+    });
+
+    if (existingCaretaker) {
+      return res.status(400).send({
+        status: "error",
+        message: "Caretaker name must be unique for this user",
+      });
     }
 
-    try {
-        const caretaker = new Caretaker({
-            userId,
-            caretakerName,
-            caretakerOtp
-        });
+    // Save caretaker
+    const caretaker = new Caretaker({
+      userId,
+      caretakerName: caretakerName.trim().toLowerCase(),
+      caretakerOtp,
+    });
 
-        await caretaker.save();
-        res.send({ status: "success", message: "Caretaker added successfully" });
-    } catch (error) {
-        console.error("Error saving caretaker:", error);
-        res.status(500).send({ status: "error", message: "Internal server error" });
-    }
+    await caretaker.save();
+
+    res.send({
+      status: "success",
+      message: "Caretaker added successfully",
+    });
+  } catch (error) {
+    console.error("Error saving caretaker:", error);
+    res
+      .status(500)
+      .send({ status: "error", message: "Internal server error" });
+  }
 });
+app.delete("/delete-caretaker/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const caretaker = await Caretaker.findByIdAndDelete(id);
+
+    if (!caretaker) {
+      return res.status(404).send({ status: "error", message: "Caretaker not found" });
+    }
+
+    res.send({ status: "success", message: "Caretaker deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting caretaker:", error);
+    res.status(500).send({ status: "error", message: "Internal server error" });
+  }
+});
+
 app.get("/get-caretakers", async (req, res) => {
     const { userId } = req.query;
 
@@ -962,14 +977,26 @@ app.get("/get-caretakers", async (req, res) => {
 });
 
 // POST /verify-caretaker
+// Verify caretaker login
 app.post('/verify-caretaker', async (req, res) => {
   const { name, otp } = req.body;
 
   try {
-    const caretaker = await Caretaker.findOne({ caretakerName: name, caretakerOtp: otp });
+    const caretaker = await Caretaker.findOne({
+      caretakerName: name,
+      caretakerOtp: otp,
+    });
 
     if (caretaker) {
-      res.json({ status: 'success', caretakerId: caretaker._id });
+      console.log("✅ Caretaker Verified:");
+      console.log("Caretaker ID:", caretaker._id);
+      console.log("Linked User ID:", caretaker.userId);
+
+      res.json({
+        status: 'success',
+        caretakerId: caretaker._id,
+        userId: caretaker.userId, // include userId in response
+      });
     } else {
       res.status(401).json({ status: 'error', message: 'Invalid credentials' });
     }
@@ -978,38 +1005,54 @@ app.post('/verify-caretaker', async (req, res) => {
     res.status(500).json({ status: 'error', message: 'Server error' });
   }
 });
-// Add this to your backend routes
-app.get("/get-user-by-caretaker", async (req, res) => {
-    const { caretakerId } = req.query;
 
-    if (!caretakerId) {
-        return res.status(400).send({ status: "error", message: "caretakerId is required" });
+
+// Fetch user by caretaker
+app.get('/get-user-by-caretaker', async (req, res) => {
+  const { caretakerId } = req.query;
+
+  if (!caretakerId) {
+    return res
+      .status(400)
+      .send({ status: 'error', message: 'caretakerId is required' });
+  }
+
+  try {
+    const caretaker = await Caretaker.findById(caretakerId);
+    if (!caretaker) {
+      return res
+        .status(404)
+        .send({ status: 'error', message: 'Caretaker not found' });
     }
 
-    try {
-        const caretaker = await Caretaker.findById(caretakerId);
-        if (!caretaker) {
-            return res.status(404).send({ status: "error", message: "Caretaker not found" });
-        }
-
-        const user = await User.findById(caretaker.userId);
-        if (!user) {
-            return res.status(404).send({ status: "error", message: "User not found" });
-        }
-
-        res.send({ 
-            status: "success", 
-            user: {
-                id: user._id,
-                name: user.Name,
-                username: user.Username
-            }
-        });
-    } catch (error) {
-        console.error("Error fetching user by caretaker:", error);
-        res.status(500).send({ status: "error", message: "Internal server error" });
+    const user = await User.findById(caretaker.userId);
+    if (!user) {
+      return res
+        .status(404)
+        .send({ status: 'error', message: 'User not found' });
     }
+
+    console.log("✅ Fetching User by Caretaker:");
+    console.log("Caretaker ID:", caretaker._id);
+    console.log("User ID:", user._id);
+
+    res.send({
+      status: 'success',
+      caretakerId: caretaker._id,
+      user: {
+        id: user._id,
+        name: user.Name,
+        username: user.Username,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching user by caretaker:', error);
+    res
+      .status(500)
+      .send({ status: 'error', message: 'Internal server error' });
+  }
 });
+
 
 const DepressionResultSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "Userinfo", required: true },
@@ -1325,6 +1368,36 @@ app.get("/get-all-chats", async (req, res) => {
     });
   }
 });
+
+// New API to get chats of a specific user
+app.get("/get-user-chats/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).send({
+        status: "error",
+        message: "userId is required",
+      });
+    }
+
+    const chats = await Chat.find({ userId })  // filter by userId
+      .sort({ createdAt: -1 })
+      .limit(500);
+
+    res.send({
+      status: "success",
+      chats,
+    });
+  } catch (error) {
+    console.error("Error fetching user chats:", error);
+    res.status(500).send({
+      status: "error",
+      message: "Internal server error",
+    });
+  }
+});
+
 
 // GET /mental-health-summary/:userId
 app.get('/mental-health-summary/:userId', async (req, res) => {

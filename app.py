@@ -6,7 +6,12 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import load_model as tf_load_model
 from tensorflow.keras.losses import MeanSquaredError
+from tensorflow.keras.preprocessing.image import img_to_array
 import os
+import cv2
+import base64
+from io import BytesIO
+from PIL import Image
 
 app = Flask(__name__)
 CORS(app)
@@ -88,12 +93,63 @@ def load_anxiety_model():
     except Exception as e:
         print("❌ Error loading anxiety model:", e)
 
+# ---------------------- FACE EXPRESSION MODULE ----------------------
+face_expression_model = None
+face_cascade = None
+
+def load_face_expression_model():
+    global face_expression_model, face_cascade
+    try:
+        # Load model from Models_App folder
+        model_path = os.path.join(MODEL_DIR, "model.h5")
+        
+        # Try to find cascade classifier in multiple locations
+        cascade_path = None
+        
+        # 1. Check in Models_App folder
+        cascade_path_models = os.path.join(MODEL_DIR, "HaarcascadeclassifierCascadeClassifier.xml")
+        if os.path.exists(cascade_path_models):
+            cascade_path = cascade_path_models
+        
+        # 2. Check in face-expression folder (if it exists)
+        if not cascade_path:
+            face_expr_dir = os.path.join(BASE_DIR, "..", "face-expression")
+            cascade_path_face_expr = os.path.join(face_expr_dir, "HaarcascadeclassifierCascadeClassifier.xml")
+            if os.path.exists(cascade_path_face_expr):
+                cascade_path = cascade_path_face_expr
+        
+        # 3. Check in current directory
+        if not cascade_path:
+            cascade_path_base = os.path.join(BASE_DIR, "HaarcascadeclassifierCascadeClassifier.xml")
+            if os.path.exists(cascade_path_base):
+                cascade_path = cascade_path_base
+        
+        # 4. Use OpenCV's default cascade classifier as fallback
+        if not cascade_path:
+            cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            print("   ⚠️  Using OpenCV default cascade classifier")
+        
+        if os.path.exists(model_path):
+            face_cascade = cv2.CascadeClassifier(cascade_path)
+            face_expression_model = tf_load_model(model_path, compile=False)
+            face_expression_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+            print(f"✅ Face expression model loaded from: {model_path}")
+            print(f"✅ Cascade classifier loaded from: {cascade_path}")
+        else:
+            print(f"⚠️  Face expression model not found at: {model_path}")
+            print("   Feature will be disabled.")
+    except Exception as e:
+        print(f"❌ Error loading face expression model: {e}")
+        import traceback
+        print(traceback.format_exc())
+
 # Load all models when starting the server
 load_suggestion_models()
 load_stress_model()
 load_suggestion_model_v2()
 load_depression_model()
 load_anxiety_model()
+load_face_expression_model()
 
 # ---------------------- ROUTES ----------------------
 @app.route('/')
@@ -305,6 +361,146 @@ def predict_anxiety():
 
     except Exception as e:
         print("❌ ERROR in anxiety prediction:", str(e))
+        return jsonify({"error": str(e)}), 500
+
+# ---------------- Face Expression Prediction ----------------
+@app.route('/predict_face_expression', methods=['POST'])
+def predict_face_expression():
+    try:
+        print("\n" + "="*60)
+        print("🔍 FACE EXPRESSION DETECTION REQUEST RECEIVED")
+        print("="*60)
+        
+        if face_expression_model is None or face_cascade is None:
+            print("❌ ERROR: Face expression model not loaded")
+            return jsonify({'error': 'Face expression model not loaded'}), 500
+
+        # Get image from request
+        if 'image' not in request.files and 'image' not in request.json:
+            print("❌ ERROR: No image provided in request")
+            return jsonify({'error': 'No image provided'}), 400
+        
+        print("📷 Processing image...")
+        
+        # Handle base64 encoded image (from React Native)
+        if 'image' in request.json:
+            image_data = request.json['image']
+            print("   - Image format: Base64 (from React Native)")
+            # Remove data URL prefix if present
+            if ',' in image_data:
+                image_data = image_data.split(',')[1]
+            
+            # Decode base64 image
+            image_bytes = base64.b64decode(image_data)
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        else:
+            # Handle file upload
+            print("   - Image format: File upload")
+            file = request.files['image']
+            image_bytes = file.read()
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if frame is None:
+            print("❌ ERROR: Could not decode image")
+            return jsonify({'error': 'Could not decode image'}), 400
+        
+        print(f"   ✅ Image decoded successfully")
+        print(f"   📐 Image dimensions: {frame.shape[1]}x{frame.shape[0]} pixels")
+        
+        # Convert to grayscale
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        print("   🔄 Converted to grayscale")
+        
+        # Detect faces
+        print("   🔍 Detecting faces...")
+        faces = face_cascade.detectMultiScale(gray)
+        print(f"   👤 Total faces detected: {len(faces)}")
+        
+        if len(faces) == 0:
+            print("   ⚠️  No faces found in the image")
+            print("="*60 + "\n")
+            return jsonify({
+                'faces_detected': 0,
+                'predictions': [],
+                'message': 'No faces detected in the image'
+            })
+        
+        emotion_labels = ['Angry', 'Disgust', 'Fear', 'Happy', 'Neutral', 'Sad', 'Surprise']
+        
+        # Process ONLY the first face (single image processing)
+        if len(faces) > 0:
+            x, y, w, h = faces[0]
+            print(f"\n   📍 Processing FIRST face only:")
+            print(f"      - Location: ({x}, {y})")
+            print(f"      - Size: {w}x{h} pixels")
+            
+            # Extract face ROI
+            roi_gray = gray[y:y+h, x:x+w]
+            roi_gray = cv2.resize(roi_gray, (48, 48), interpolation=cv2.INTER_AREA)
+            print(f"      - Resized to: 48x48 pixels (model input size)")
+            
+            if np.sum([roi_gray]) != 0:
+                # Preprocess for model
+                roi = roi_gray.astype('float') / 255.0
+                roi = img_to_array(roi)
+                roi = np.expand_dims(roi, axis=0)
+                
+                # Predict emotion
+                print("      🤖 Running emotion prediction model...")
+                prediction = face_expression_model.predict(roi, verbose=0)[0]
+                emotion_index = prediction.argmax()
+                emotion_label = emotion_labels[emotion_index]
+                confidence = float(prediction[emotion_index]) * 100
+                
+                print(f"\n   📊 PREDICTION RESULTS:")
+                print(f"      🎯 Predicted Emotion: {emotion_label}")
+                print(f"      📈 Confidence: {confidence:.2f}%")
+                print(f"\n   📋 All Emotion Probabilities:")
+                
+                # Get all emotion probabilities
+                emotion_probs = {}
+                for j in range(len(emotion_labels)):
+                    prob = float(prediction[j]) * 100
+                    emotion_probs[emotion_labels[j]] = prob
+                    print(f"      - {emotion_labels[j]:12s}: {prob:6.2f}%")
+                
+                result = {
+                    'face_number': 1,
+                    'bounding_box': {
+                        'x': int(x),
+                        'y': int(y),
+                        'width': int(w),
+                        'height': int(h)
+                    },
+                    'predicted_emotion': emotion_label,
+                    'confidence': round(confidence, 2),
+                    'all_emotions': emotion_probs
+                }
+                
+                print(f"\n   ✅ Processing complete!")
+                print(f"   📤 Returning result: {emotion_label} ({confidence:.2f}% confidence)")
+                print("="*60 + "\n")
+                
+                return jsonify({
+                    'faces_detected': 1,
+                    'predictions': [result]
+                })
+            else:
+                print("   ❌ ERROR: Could not process face region (empty ROI)")
+                print("="*60 + "\n")
+                return jsonify({
+                    'faces_detected': 0,
+                    'predictions': [],
+                    'message': 'Could not process face region'
+                })
+        
+    except Exception as e:
+        print(f"\n❌ ERROR in face expression prediction: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        print("="*60 + "\n")
         return jsonify({"error": str(e)}), 500
 
 # ---------------------- SERVER START ----------------------

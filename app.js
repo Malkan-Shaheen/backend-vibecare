@@ -469,13 +469,23 @@ const formatUserRowHtml = (user, index) => {
     ? new Date(createdAt).toLocaleString()
     : "N/A";
   return `
-    <tr onclick="window.location='/admin/users/${user._id}'">
+    <tr>
       <td>${index}</td>
       <td>${user.Name || "-"}</td>
       <td>${user.Username || "-"}</td>
       <td>${user.Email || "-"}</td>
       <td><span class="status">${user.status || "Active"}</span></td>
       <td>${formattedDate}</td>
+      <td>
+        <button
+          class="view-user-btn"
+          data-user-id="${user._id}"
+          onclick="window.location='/admin/users/${user._id}'"
+          style="background:#4CAF50;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;"
+        >
+          View
+        </button>
+      </td>
     </tr>
   `;
 };
@@ -541,6 +551,7 @@ app.get("/admin/users", async (req, res) => {
                 <th>Email</th>
                 <th>Status</th>
                 <th>Joined</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody
@@ -552,7 +563,7 @@ app.get("/admin/users", async (req, res) => {
               ${
                 data.length > 0
                   ? data.join("")
-                  : `<tr><td colspan="6" style="text-align:center;padding:24px;">No users found.</td></tr>`
+                  : `<tr><td colspan="7" style="text-align:center;padding:24px;">No users found.</td></tr>`
               }
             </tbody>
           </table>
@@ -575,10 +586,7 @@ app.get("/admin/users", async (req, res) => {
           font-size:12px;
           letter-spacing:0.5px;
         }
-        table tr {
-          cursor:pointer;
-        }
-        table tr:hover td {
+        table tr td:not(:last-child):hover {
           background:#fff6f6;
         }
         .status {
@@ -1590,6 +1598,11 @@ const SuccessStorySchema = new mongoose.Schema({
   title: { type: String, required: true },
   subtitle: { type: String, required: true },
   story: { type: String, required: true }, // Full story content
+  status: {
+    type: String,
+    enum: ["pending", "publish", "rejected"],
+    default: "pending",
+  }, // Story status: pending (default), publish, or rejected
   createdAt: { type: Date, default: Date.now }, // Timestamp
 });
 
@@ -1631,7 +1644,10 @@ app.use(
 
 app.get("/success-stories", async (req, res) => {
   try {
-    const stories = await SuccessStory.find().sort({ createdAt: -1 }); // Fetch all stories sorted by date
+    // Only return stories with status "publish"
+    const stories = await SuccessStory.find({ status: "publish" })
+      .sort({ createdAt: -1 })
+      .populate("userId", "Name Email"); // Optionally populate user info
     res.status(200).json(stories);
   } catch (error) {
     console.error("Error fetching stories:", error);
@@ -1660,6 +1676,74 @@ app.post("/success-stories", async (req, res) => {
       .json({ message: "Story added successfully", story: newStory });
   } catch (error) {
     console.error("Error adding story:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+app.get("/my-stories/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Validate userId - check if it's null, undefined, or invalid ObjectId
+    if (
+      !userId ||
+      userId === "null" ||
+      userId === "undefined" ||
+      !mongoose.Types.ObjectId.isValid(userId)
+    ) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid user ID",
+      });
+    }
+
+    // Get all stories by this user (all statuses: pending, publish, rejected)
+    const stories = await SuccessStory.find({ userId })
+      .sort({ createdAt: -1 })
+      .populate("userId", "Name Email");
+    res.status(200).json(stories);
+  } catch (error) {
+    console.error("Error fetching user stories:", error);
+    res.status(500).json({ status: "error", message: "Server error" });
+  }
+});
+
+app.put("/success-stories/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, subtitle, story, userId } = req.body;
+
+    // Verify the story belongs to the user
+    const existingStory = await SuccessStory.findById(id);
+    if (!existingStory) {
+      return res.status(404).json({ message: "Story not found" });
+    }
+
+    if (existingStory.userId.toString() !== userId) {
+      return res
+        .status(403)
+        .json({ message: "You can only update your own stories" });
+    }
+
+    // Only allow updating if status is pending or rejected (not published)
+    if (existingStory.status === "publish") {
+      return res
+        .status(400)
+        .json({ message: "Cannot update published stories" });
+    }
+
+    // Update the story
+    const updatedStory = await SuccessStory.findByIdAndUpdate(
+      id,
+      { title, subtitle, story, status: "pending" }, // Reset to pending after update
+      { new: true, runValidators: true }
+    );
+
+    res
+      .status(200)
+      .json({ message: "Story updated successfully", story: updatedStory });
+  } catch (error) {
+    console.error("Error updating story:", error);
     res.status(500).json({ message: "Server error" });
   }
 });

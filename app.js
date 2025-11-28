@@ -311,6 +311,7 @@ const ADMIN_NAV = [
   { id: "users", label: "Users", href: "/admin/users" },
   { id: "loginHistory", label: "Login History", href: "/admin/login-history" },
   { id: "feedback", label: "Feedback", href: "/admin/feedback" },
+  { id: "stories", label: "Success Stories", href: "/admin/stories" },
 ];
 
 const renderAdminLayout = ({ title, activeId, content }) => {
@@ -1419,31 +1420,6 @@ const FeedbackSchema = new mongoose.Schema(
 );
 
 const Feedback = mongoose.model("Feedback", FeedbackSchema);
-const createAdminOverviewRouter = require("./routes/admin/overview");
-const createAdminLoginHistoryRouter = require("./routes/admin/loginHistory");
-const createAdminFeedbackRouter = require("./routes/admin/feedback");
-
-app.use(
-  "/admin",
-  createAdminOverviewRouter({
-    renderAdminLayout,
-    getAnalyticsSnapshot,
-  })
-);
-app.use(
-  "/admin/login-history",
-  createAdminLoginHistoryRouter({
-    renderAdminLayout,
-    LoginHistory,
-  })
-);
-app.use(
-  "/admin/feedback",
-  createAdminFeedbackRouter({
-    renderAdminLayout,
-    Feedback,
-  })
-);
 
 // Route to Submit Feedback
 app.post("/submit-feedback", async (req, res) => {
@@ -1606,7 +1582,11 @@ app.put("/feedbacks/:id/respond", async (req, res) => {
 
 // Success Story Schema
 const SuccessStorySchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }, // Reference to the user who posted the story
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Userinfo",
+    required: true,
+  }, // Reference to the user who posted the story
   title: { type: String, required: true },
   subtitle: { type: String, required: true },
   story: { type: String, required: true }, // Full story content
@@ -1614,6 +1594,40 @@ const SuccessStorySchema = new mongoose.Schema({
 });
 
 const SuccessStory = mongoose.model("SuccessStory", SuccessStorySchema);
+const createAdminOverviewRouter = require("./routes/admin/overview");
+const createAdminLoginHistoryRouter = require("./routes/admin/loginHistory");
+const createAdminFeedbackRouter = require("./routes/admin/feedback");
+const createAdminStoriesRouter = require("./routes/admin/stories");
+
+app.use(
+  "/admin",
+  createAdminOverviewRouter({
+    renderAdminLayout,
+    getAnalyticsSnapshot,
+  })
+);
+app.use(
+  "/admin/login-history",
+  createAdminLoginHistoryRouter({
+    renderAdminLayout,
+    LoginHistory,
+  })
+);
+app.use(
+  "/admin/feedback",
+  createAdminFeedbackRouter({
+    renderAdminLayout,
+    Feedback,
+  })
+);
+app.use(
+  "/admin/stories",
+  createAdminStoriesRouter({
+    renderAdminLayout,
+    SuccessStory,
+    User,
+  })
+);
 
 app.get("/success-stories", async (req, res) => {
   try {

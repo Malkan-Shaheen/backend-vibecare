@@ -12,6 +12,7 @@ import cv2
 import base64
 from io import BytesIO
 from PIL import Image
+import traceback
 
 app = Flask(__name__)
 CORS(app)
@@ -144,22 +145,49 @@ def load_face_expression_model():
         print(traceback.format_exc())
 
 # Load all models when starting the server
+print("🔍 STARTING MODEL LOADING PROCESS...")
 load_suggestion_models()
 load_stress_model()
 load_suggestion_model_v2()
 load_depression_model()
 load_anxiety_model()
 load_face_expression_model()
+print("🎯 ALL MODELS LOADING COMPLETED")
 
 # ---------------------- ROUTES ----------------------
 @app.route('/')
 def home():
-    return "✅ Flask backend is running."
+    print("\n" + "="*50)
+    print("🏠 ROOT ENDPOINT CALLED")
+    print("="*50)
+    response = "✅ Flask backend is running."
+    print(f"📤 Returning: {response}")
+    return response
 
+@app.route('/test_json', methods=['GET'])
+def test_json():
+    print("\n" + "="*50)
+    print("🧪 TEST_JSON ENDPOINT CALLED")
+    print("="*50)
+    try:
+        response_data = {
+            "status": "success", 
+            "message": "JSON test successful",
+            "timestamp": "test"
+        }
+        print(f"📤 Returning JSON: {response_data}")
+        return jsonify(response_data)
+    except Exception as e:
+        print(f"❌ ERROR in test_json: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/features', methods=['GET'])
 def get_model_features():
+    print("\n" + "="*50)
+    print("📋 FEATURES ENDPOINT CALLED")
+    print("="*50)
     try:
+        print("🔧 Building features info...")
         features_info = {}
 
         # Stress Model
@@ -188,20 +216,34 @@ def get_model_features():
         # Depression Model
         features_info['depression_features'] = "21 BDI questionnaire responses"
 
+        print(f"📤 Returning features info with {len(features_info)} categories")
         return jsonify(features_info)
 
     except Exception as e:
+        print(f"❌ ERROR in features endpoint: {str(e)}")
+        print(traceback.format_exc())
         return jsonify({'error': str(e)})
 
 # ---------------- Stress Prediction ----------------
 @app.route('/predict_stress', methods=['POST'])
 def predict_stress():
+    print("\n" + "="*50)
+    print("😰 STRESS PREDICTION ENDPOINT CALLED")
+    print("="*50)
     try:
+        print("🔍 Checking stress model availability...")
         if stress_model is None or stress_scaler is None:
+            print("❌ Stress model not loaded")
             return jsonify({'error': 'Stress model not loaded'}), 500
 
+        print("📥 Getting request data...")
         data = request.get_json()
+        print(f"📦 Received data: {data}")
         
+        if not data:
+            print("❌ No JSON data received")
+            return jsonify({'error': 'No JSON data received'}), 400
+
         features = [
             'anxiety_level', 'self_esteem', 'mental_health_history', 'depression', 
             'headache', 'blood_pressure', 'sleep_quality', 'breathing_problem', 
@@ -211,11 +253,20 @@ def predict_stress():
             'extracurricular_activities', 'bullying'
         ]
         
+        print(f"🔧 Processing {len(features)} features...")
         input_data = [float(data[feature]) for feature in features]
-        input_df = pd.DataFrame([input_data], columns=features)
-        input_scaled = stress_scaler.transform(input_df)
+        print(f"📊 Input data prepared: {input_data}")
         
+        input_df = pd.DataFrame([input_data], columns=features)
+        print("📈 Dataframe created")
+        
+        input_scaled = stress_scaler.transform(input_df)
+        print("⚖️ Data scaled")
+        
+        print("🤖 Making prediction...")
         prediction = stress_model.predict(input_scaled)
+        print(f"🎯 Raw prediction: {prediction}")
+        
         predicted_class = int(np.argmax(prediction, axis=1)[0])
         confidence = float(np.max(prediction)) * 100
         
@@ -235,32 +286,49 @@ def predict_stress():
             }
         }
         
+        print(f"📤 Returning result: {result}")
         return jsonify(result)
     
     except Exception as e:
+        print(f"❌ ERROR in stress prediction: {str(e)}")
+        print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 # ---------------- Suggestion Prediction ----------------
 @app.route('/predict_suggestion', methods=['POST'])
 def predict_suggestion():
+    print("\n" + "="*50)
+    print("💡 SUGGESTION PREDICTION ENDPOINT CALLED")
+    print("="*50)
     try:
+        print("🔍 Checking suggestion model availability...")
         if suggestion_model is None or label_encoder is None:
+            print("❌ Suggestion model not loaded")
             return jsonify({'error': 'Suggestion model not loaded'}), 500
 
+        print("📥 Getting request data...")
         data = request.get_json()
+        print(f"📦 Received data: {data}")
         
+        if not data:
+            print("❌ No JSON data received")
+            return jsonify({'error': 'No JSON data received'}), 400
+
         required_fields = [
             'depression_level', 'stress_level', 'anxiety_level',
             'age', 'gender', 'relationship', 'living_situation'
         ]
         
+        print(f"🔍 Checking required fields: {required_fields}")
         for field in required_fields:
             if field not in data:
+                print(f"❌ Missing field: {field}")
                 return jsonify({
                     'status': 'error',
                     'message': f'Missing required field: {field}'
                 }), 400
 
+        print("✅ All required fields present")
         # Create DataFrame with proper feature names
         input_data = pd.DataFrame([[
             int(data['depression_level']),
@@ -275,15 +343,26 @@ def predict_suggestion():
             'age', 'gender', 'relationship', 'living_situation'
         ])
         
-        encoded_prediction = suggestion_model.predict(input_data)
-        suggestion = label_encoder.inverse_transform(encoded_prediction)[0]
+        print(f"📊 Input dataframe: {input_data.values.tolist()}")
         
-        return jsonify({
+        print("🤖 Making prediction...")
+        encoded_prediction = suggestion_model.predict(input_data)
+        print(f"🎯 Encoded prediction: {encoded_prediction}")
+        
+        suggestion = label_encoder.inverse_transform(encoded_prediction)[0]
+        print(f"💡 Decoded suggestion: {suggestion}")
+        
+        response = {
             'status': 'success',
             'recommendation': suggestion
-        })
+        }
+        
+        print(f"📤 Returning response: {response}")
+        return jsonify(response)
     
     except Exception as e:
+        print(f"❌ ERROR in suggestion prediction: {str(e)}")
+        print(traceback.format_exc())
         return jsonify({
             'status': 'error',
             'message': str(e)
@@ -291,6 +370,7 @@ def predict_suggestion():
 
 # ---------------- Depression Prediction ----------------
 def interpret_depression_score(score):
+    print(f"🔍 Interpreting depression score: {score}")
     if score < 11:
         return "Normal Ups and Downs"
     elif score < 17:
@@ -306,61 +386,104 @@ def interpret_depression_score(score):
 
 @app.route('/predict_depression', methods=['POST'])
 def predict_depression():
+    print("\n" + "="*50)
+    print("😔 DEPRESSION PREDICTION ENDPOINT CALLED")
+    print("="*50)
     try:
+        print("🔍 Checking depression model availability...")
         if depression_model is None:
+            print("❌ Depression model not loaded")
             return jsonify({'error': 'Depression model not loaded'}), 500
 
-        data = request.json.get("responses")
-        if not data or len(data) != 21:
+        print("📥 Getting request data...")
+        data = request.get_json()
+        print(f"📦 Received data: {data}")
+        
+        if not data:
+            print("❌ No JSON data received")
+            return jsonify({"error": "No JSON data received"}), 400
+
+        responses = data.get("responses")
+        print(f"📋 Responses received: {responses}")
+        
+        if not responses or len(responses) != 21:
+            print(f"❌ Invalid responses length: {len(responses) if responses else 0}")
             return jsonify({"error": "Expected 21 responses."}), 400
 
-        input_array = np.array([data])
+        print("🔧 Preparing input data...")
+        input_array = np.array([responses])
+        print(f"📊 Input array shape: {input_array.shape}")
+        
+        print("🤖 Making prediction...")
         prediction = depression_model.predict(input_array)[0][0]
+        print(f"🎯 Raw prediction: {prediction}")
 
-        bdi_score = sum(data)
+        bdi_score = sum(responses)
+        print(f"📊 BDI Score calculated: {bdi_score}")
+        
         depression_level = interpret_depression_score(bdi_score)
+        print(f"🔍 Depression level: {depression_level}")
 
-        return jsonify({
+        response = {
             "depression_level": depression_level,
             "bdi_score": bdi_score
-        })
+        }
+        
+        print(f"📤 Returning response: {response}")
+        return jsonify(response)
 
     except Exception as e:
-        print("❌ ERROR in depression prediction:", str(e))
+        print(f"❌ ERROR in depression prediction: {str(e)}")
+        print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
 # ---------------- Anxiety Prediction ----------------
 @app.route('/predict_anxiety', methods=['POST'])
 def predict_anxiety():
+    print("\n" + "="*50)
+    print("😰 ANXIETY PREDICTION ENDPOINT CALLED")
+    print("="*50)
     try:
+        print("🔍 Checking anxiety model availability...")
         if anxiety_model is None:
+            print("❌ Anxiety model not loaded")
             return jsonify({'error': 'Anxiety model not loaded'}), 500
 
+        print("📥 Getting request data...")
         data = request.get_json()
+        print(f"📦 Received data: {data}")
+        
+        if not data:
+            print("❌ No JSON data received")
+            return jsonify({"error": "No JSON data received"}), 400
 
         features = [
-            data['Gender'],
-            data['Age'],
-            data['numbness'],
-            data['wobbliness'],
-            data['afraidofworsthappening'],
-            data['heartpounding'],
-            data['unsteadyorunstable'],
-            data['terrified'],
-            data['handstrembling'],
-            data['shakystate'],
-            data['difficultyinbreathing'],
-            data['scared'],
-            data['hotorcoldsweats'],
-            data['faceflushed']
+            'Gender', 'Age', 'numbness', 'wobbliness', 'afraidofworsthappening',
+            'heartpounding', 'unsteadyorunstable', 'terrified', 'handstrembling',
+            'shakystate', 'difficultyinbreathing', 'scared', 'hotorcoldsweats', 'faceflushed'
         ]
+        
+        print(f"🔍 Extracting {len(features)} features...")
+        feature_values = []
+        for feature in features:
+            if feature not in data:
+                print(f"❌ Missing feature: {feature}")
+                return jsonify({"error": f"Missing feature: {feature}"}), 400
+            feature_values.append(data[feature])
+        
+        print(f"📊 Feature values: {feature_values}")
 
-        prediction = anxiety_model.predict([features])[0]
+        print("🤖 Making prediction...")
+        prediction = anxiety_model.predict([feature_values])[0]
+        print(f"🎯 Raw prediction: {prediction}")
 
-        return jsonify({'predicted_anxiety_level': int(prediction)})
+        response = {'predicted_anxiety_level': int(prediction)}
+        print(f"📤 Returning response: {response}")
+        return jsonify(response)
 
     except Exception as e:
-        print("❌ ERROR in anxiety prediction:", str(e))
+        print(f"❌ ERROR in anxiety prediction: {str(e)}")
+        print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
 # ---------------- Face Expression Prediction ----------------
@@ -503,7 +626,30 @@ def predict_face_expression():
         print("="*60 + "\n")
         return jsonify({"error": str(e)}), 500
 
+# Add global error handler
+@app.errorhandler(Exception)
+def handle_exception(e):
+    print(f"\n❌ GLOBAL ERROR HANDLER TRIGGERED: {str(e)}")
+    print(traceback.format_exc())
+    return jsonify({
+        'status': 'error',
+        'message': 'Internal server error',
+        'error': str(e)
+    }), 500
+
+# Add after_request handler to log responses
+@app.after_request
+def after_request(response):
+    print(f"📤 Response status: {response.status_code}")
+    print(f"📤 Response content-type: {response.content_type}")
+    return response
+
 # ---------------------- SERVER START ----------------------
 if __name__ == '__main__':
     print("🚀 Starting Flask server on 0.0.0.0:5000")
+    print("🔧 Debug mode: ON")
+    print("📡 Server will be available at:")
+    print("   - http://127.0.0.1:5000")
+    print("   - http://192.168.18.65:5000")
+    print("🎯 Test endpoint available at: /test_json")
     app.run(debug=True, host='0.0.0.0', port=5000)

@@ -9,7 +9,7 @@ module.exports = {
   EMAIL_USER: process.env.EMAIL_USER,
   EMAIL_PASS: process.env.EMAIL_PASS,
 API_BASE_URL: isProd
-    ? "http://192.168.18.65:5000"
-    : "http://192.168.18.65:5000"
+    ? "http://10.110.10.86:5000"
+    : "http://10.110.10.86:5000"
 
 };
